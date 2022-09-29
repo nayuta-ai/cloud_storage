@@ -16,12 +16,13 @@ spec:
                 spec:
                         containers:
                                 - image: yuta42173/pytorch-app:latest
-                                  name: pytorch
+                                  name: app
                                   ports:
                                           - containerPort: 8080
                                   resources:
-                                          limits:
-                                                  cpu: 50m
+                                          requests:
+                                                  cpu: 100m
+                                                  memory: 50Mi
                                   command: ["tail", "-f", "/dev/null"]
                                   volumeMounts:
                                           - name: claim-volume
