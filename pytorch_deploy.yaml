@@ -5,7 +5,7 @@ metadata:
                 app: app
         name: app
 spec:
-        replicas: 1
+        replicas: 3
         selector:
                 matchLabels:
                         app: app
@@ -21,7 +21,7 @@ spec:
                                           - containerPort: 8080
                                   resources:
                                           requests:
-                                                  cpu: 100m
+                                                  cpu: 50m
                                                   memory: 50Mi
                                   command: ["tail", "-f", "/dev/null"]
                                   volumeMounts:
