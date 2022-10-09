@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-vpa-deployment
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      containers:
+      - args: [ "--cpu", "1", "--vm", "1", "--vm-bytes", "800M", "--vm-hang", "1"]
+        command:
+        - stress
+        name: vpa-container
+        image: amsy810/tools:v2.0
+        resources:
+          requests:
+            cpu: 300m
+            memory: 300Mi
+      - name: no-vpa-container
+        image: amsy810/tools:v2.0
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
