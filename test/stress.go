@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -17,6 +16,7 @@ func StressTest() {
 	if err != nil {
 		log.Printf("unexpected error: %v", err)
 	}
+	// Connect to deploy in etcd.
 	kubeclient := connectToDeploy(client, "default")
 
 	// Create Pods
@@ -25,6 +25,7 @@ func StressTest() {
 		log.Printf("unexpected error: %v", err)
 	}
 
+	// Wait for minutes running pods
 	time.Sleep(60 * time.Second)
 
 	// Fetch pod lists for getting pods name or container name
@@ -34,29 +35,32 @@ func StressTest() {
 	}
 
 	// Execute stress command
-	stdin := os.Stdin
-	stdout := os.Stdout
-	stderr := os.Stderr
-	go execCommand(config, client, "stress -m 1 --vm-bytes 52428800 --vm-hang 0", pods[0], stdin, stdout, stderr)
+	go execCommand(config, client, "stress -m 1 --vm-bytes 52428800 --vm-hang 0", pods[0], os.Stdin, os.Stdout, os.Stderr)
+
+	// Wait for minutes reflecting it to the metrics server
 	time.Sleep(60 * time.Second)
 
 	if !check_vpa(pods[0].Spec.Containers[0]) {
 		log.Println("unexpected error: VPA doesn't work")
 	}
+
 	// Fetch container metrics after placing a load
 	_, memory, err := fetchMetrics(config, pods[0].Spec.Containers[0].Name)
 	if err != nil {
 		log.Printf("unexpected error: %v", err)
 	}
-	fmt.Println(memory[1])
+
+	// Test for pods which stress process doesn't affect
 	if memory[1] > MEMORY_DEFAULT_LIMIT {
 		log.Println("unexpected error: The memory resource is out of limits.")
 	}
-	fmt.Println(memory[0])
+
+	// Test for pods which stress process affects
 	if MEMORY_DEFAULT_LIMIT > memory[0] || memory[0] > MEMORY_VPA_LIMIT {
 		log.Println("unexpected error: The memory resources is out of range.")
 	}
-	time.Sleep(10 * time.Second)
+
+	// Delete all pods for the test
 	err = deletePod(kubeclient, "sample-vpa-deployment")
 	if err != nil {
 		log.Printf("unexpected error: %v", err)

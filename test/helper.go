@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -23,11 +23,6 @@ import (
 	metrics "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-func connectToDeploy(client *clientset.Clientset, namespace string) v1.DeploymentInterface {
-	kubeclient := client.AppsV1().Deployments(namespace)
-	return kubeclient
-}
-
 func connectToKubernetes() (*rest.Config, *clientset.Clientset, error) {
 	// The first step is to connect to the cluster.
 	// Connection to the cluster requires K8s cluster config file, since we are connecting to an external remote cluster.
@@ -39,10 +34,15 @@ func connectToKubernetes() (*rest.Config, *clientset.Clientset, error) {
 		kubeconfig = filepath.Join(homedir.HomeDir(), ".kube", "config")
 	}
 
+	// The next step is to build the cluster config from url or config file path.
+	// In this case, it builds the cluster config from config file path.
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// The final step is to create the clientset from config file.
+	// It can get the some information from pods or nodes.
 	client, err := clientset.NewForConfig(config)
 	if err != nil {
 		return nil, nil, err
@@ -50,51 +50,29 @@ func connectToKubernetes() (*rest.Config, *clientset.Clientset, error) {
 	return config, client, nil
 }
 
-var testObject = &appsv1.Deployment{
-	TypeMeta: metav1.TypeMeta{
-		Kind:       "Deployment",
-		APIVersion: "apps/v1",
-	},
-	ObjectMeta: metav1.ObjectMeta{
-		Name: "sample-vpa-deployment",
-	},
-	Spec: appsv1.DeploymentSpec{
-		Replicas: ptrint32(2),
-		Selector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				"app": "sample-app",
-			},
-		},
-		Template: corev1.PodTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					"app": "sample-app",
-				},
-			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					corev1.Container{
-						Name:  "vpa-container",
-						Image: "amsy810/tools:v2.0",
-						Resources: corev1.ResourceRequirements{
-							Limits: corev1.ResourceList{
-								"cpu":    *resource.NewDecimalQuantity(convertDec("30m"), resource.DecimalSI),
-								"memory": *resource.NewQuantity(31457280, resource.BinarySI),
-							},
-							Requests: corev1.ResourceList{
-								"cpu":    *resource.NewDecimalQuantity(convertDec("10m"), resource.DecimalSI),
-								"memory": *resource.NewQuantity(10485760, resource.BinarySI),
-							},
-						},
-					},
-				},
-			},
-		},
-		Strategy:        appsv1.DeploymentStrategy{},
-		MinReadySeconds: 0,
-	},
+// It can fetch pod lists in the cluster.
+func fetchPodList(clientset *clientset.Clientset) ([]corev1.Pod, error) {
+	pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return pods.Items, nil
 }
 
+// It can fetch container lists in the pod.
+func fetchContainerlist(pod corev1.Pod) []corev1.Container {
+	var containerList []corev1.Container
+	containerList = append(containerList, pod.Spec.Containers...)
+	return containerList
+}
+
+// Check the change which VPA affects on the request resources for each pod.
+func check_vpa(container corev1.Container) bool {
+	return fmt.Sprintf("%v", container.Resources.Requests.Memory()) == fmt.Sprintf("%v", resource.NewQuantity(62914560, resource.BinarySI))
+}
+
+// Fetch all resource information such as CPU, memory for each pod.
 func fetchMetrics(config *rest.Config, container_name string) ([]*inf.Dec, []int, error) {
 	// connect to k8s cluster
 	mc, err := metrics.NewForConfig(config)
@@ -125,41 +103,9 @@ func fetchMetrics(config *rest.Config, container_name string) ([]*inf.Dec, []int
 	return cpu_list, memory_list, nil
 }
 
-func fetchPodList(clientset *clientset.Clientset) ([]corev1.Pod, error) {
-	pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	return pods.Items, nil
-}
-
-func fetchContainerlist(pod corev1.Pod) []corev1.Container {
-	var containerList []corev1.Container
-	containerList = append(containerList, pod.Spec.Containers...)
-	return containerList
-}
-
-func fetchPodLogs(clientset *clientset.Clientset, pod corev1.Pod, container string) (string, error) {
-	podLopOpts := corev1.PodLogOptions{}
-	podLopOpts.Container = container
-	podLopOpts.TailLines = &[]int64{int64(100)}[0]
-	podLopOpts.Follow = true
-	req := clientset.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &podLopOpts)
-	podLogs, err := req.Stream(context.TODO())
-	if err != nil {
-		return "", err
-	}
-	defer podLogs.Close()
-
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, podLogs)
-	if err != nil {
-		return "", err
-	}
-	log := buf.String()
-	fmt.Println(log)
-	return log, nil
+func connectToDeploy(client *clientset.Clientset, namespace string) v1.DeploymentInterface {
+	kubeclient := client.AppsV1().Deployments(namespace)
+	return kubeclient
 }
 
 func createPod(config appsv1.Deployment, kubeclient v1.DeploymentInterface) error {
@@ -182,7 +128,8 @@ func deletePod(kubeclient v1.DeploymentInterface, name string) error {
 	return nil
 }
 
-func execCommand(config *rest.Config, clientset *clientset.Clientset, command string, pod corev1.Pod, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+// Run some specific process, and it run as go routine.
+func execCommand(config *rest.Config, clientset *clientset.Clientset, command string, pod corev1.Pod, stdin io.Reader, stdout io.Writer, stderr io.Writer) {
 	cmd := []string{
 		"sh",
 		"-c",
@@ -203,7 +150,7 @@ func execCommand(config *rest.Config, clientset *clientset.Clientset, command st
 	req.VersionedParams(option, scheme.ParameterCodec)
 	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
 	if err != nil {
-		return err
+		log.Println(err)
 	}
 	err = exec.Stream(remotecommand.StreamOptions{
 		Stdin:  stdin,
@@ -211,10 +158,6 @@ func execCommand(config *rest.Config, clientset *clientset.Clientset, command st
 		Stderr: stderr,
 	})
 	if err != nil {
-		return err
+		log.Println(err)
 	}
-	return nil
-}
-func check_vpa(container corev1.Container) bool {
-	return fmt.Sprintf("%v", container.Resources.Requests.Memory()) == fmt.Sprintf("%v", resource.NewQuantity(62914560, resource.BinarySI))
 }
