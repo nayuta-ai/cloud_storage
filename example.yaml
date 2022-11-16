@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: hello-
+spec:
+  completions: 5
+  parallelism: 3
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 10
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: job
+          image: bash
+          args:
+            - echo
+            - Hello, world!
+          resources:
+            limits:
+              cpu: 200m
+              memory: 200Mi
