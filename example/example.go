@@ -15,16 +15,8 @@ func ExampleStressTest() {
 	if err != nil {
 		log.Printf("failed to create new cluster: %v", err)
 	}
-	err = cluster.NewMetricsClient()
-	if err != nil {
-		log.Printf("failed to create new client: %v", err)
-	}
-	err = cluster.NewClient()
-	if err != nil {
-		log.Printf("failed to create new client: %v", err)
-	}
 	// Create Pods
-	config, pods, err := cluster.CreatePod(filepath, "")
+	config, pods, err := cluster.CompletePods(filepath, "")
 	if err != nil {
 		log.Fatalf("failed to create new pods: %v", err)
 	}

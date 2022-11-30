@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"gopkg.in/inf.v0"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	autoscalev1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
@@ -14,7 +15,17 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func (cluster *Cluster) fetchPodList(namespace string) ([]corev1.Pod, error) {
+// FetchInterface plays the role of making unit test easy.
+type FetchInterface interface {
+	FetchPodList(string, *Cluster) ([]corev1.Pod, error)
+	FetchMetricsList(string, *Cluster) ([]*inf.Dec, []int64, error)
+}
+
+// Config plays the role of setting file for functions in recorder.go
+type Config struct{}
+
+// FetchPodList extracts PodList included containers information and so on.
+func (c *Config) FetchPodList(namespace string, cluster *Cluster) ([]corev1.Pod, error) {
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -25,7 +36,8 @@ func (cluster *Cluster) fetchPodList(namespace string) ([]corev1.Pod, error) {
 	return podList.Items, nil
 }
 
-func (cluster *Cluster) fetchMetricsList(containerName string) ([]*inf.Dec, []int64, error) {
+// FetchMetricsList extracts cpu and memory resource list included containers resource in the pod.
+func (c *Config) FetchMetricsList(containerName string, cluster *Cluster) ([]*inf.Dec, []int64, error) {
 	// connect to k8s cluster
 	mc, err := metrics.NewForConfig(cluster.Config)
 	if err != nil {
@@ -35,8 +47,8 @@ func (cluster *Cluster) fetchMetricsList(containerName string) ([]*inf.Dec, []in
 	if err != nil {
 		return nil, nil, err
 	}
-	cpu_list := make([]*inf.Dec, 0)
-	memory_list := make([]int64, 0)
+	cpuList := make([]*inf.Dec, 0)
+	memoryList := make([]int64, 0)
 	for _, podMetric := range podMetrics.Items {
 		podContainers := podMetric.Containers
 		for _, container := range podContainers {
@@ -46,16 +58,38 @@ func (cluster *Cluster) fetchMetricsList(containerName string) ([]*inf.Dec, []in
 				return nil, nil, fmt.Errorf("error: Can't fetch memory resources")
 			}
 			if container.Name == containerName {
-				cpu_list = append(cpu_list, cpuQuantity)
-				memory_list = append(memory_list, memQuantity)
+				cpuList = append(cpuList, cpuQuantity)
+				memoryList = append(memoryList, memQuantity)
 			}
 		}
 
 	}
-	return cpu_list, memory_list, nil
+	return cpuList, memoryList, nil
 }
 
-func fetchVPAConfig(filepath string) (*autoscalev1.VerticalPodAutoscaler, error) {
+// FetchDeploymentConfig extracts Deployment structure from YAML file.
+func FetchDeploymentConfig(path string) (*appsv1.Deployment, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+
+	b, err := ioutil.ReadAll(file)
+	if err != nil {
+		panic(err)
+	}
+
+	deploymentConfig := &appsv1.Deployment{}
+	err = yaml.Unmarshal(b, deploymentConfig)
+	if err != nil {
+		panic(err)
+	}
+
+	return deploymentConfig, nil
+}
+
+// FetchVPAConfig extracts VPA structure from YAML file.
+func FetchVPAConfig(filepath string) (*autoscalev1.VerticalPodAutoscaler, error) {
 	file, err := os.Open(filepath)
 	if err != nil {
 		return nil, err

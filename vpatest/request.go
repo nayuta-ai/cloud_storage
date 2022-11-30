@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"time"
@@ -12,14 +11,13 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1 "k8s.io/client-go/kubernetes/typed/apps/v1"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/kubectl/pkg/scheme"
-	"sigs.k8s.io/yaml"
 )
 
+// Run executes stress command, fetches the resource information in pods, and validate the correct range of the resource fetched.
 func (cluster *Cluster) Run(vpapath string, pods corev1.Pod) error {
-	vpaConfig, err := fetchVPAConfig(vpapath)
+	vpaConfig, err := FetchVPAConfig(vpapath)
 	if err != nil {
 		log.Println(err)
 	}
@@ -36,11 +34,11 @@ func (cluster *Cluster) Run(vpapath string, pods corev1.Pod) error {
 	loadVal := (MEMORY_DEFAULT_LIMIT + MEMORY_VPA_LIMIT) / 2
 	stressCommand := fmt.Sprintf("stress -m 1 --vm-bytes %d --vm-hang 0", loadVal)
 	log.Println("used the right command:", stressCommand)
-	go cluster.execCommand(stressCommand, pods)
+	go cluster.ExecCommand(stressCommand, pods)
 	log.Println("load memory on pods")
 	var memoryLoadVal int64
 	for i := 0; ; i++ {
-		_, memory, err := cluster.fetchMetricsList(pods.Spec.Containers[0].Name)
+		_, memory, err := cluster.Model.FetchMetricsList(pods.Spec.Containers[0].Name, cluster)
 		if err != nil {
 			return err
 		}
@@ -52,15 +50,13 @@ func (cluster *Cluster) Run(vpapath string, pods corev1.Pod) error {
 	log.Println("Fetched the pod metrics successfully")
 	// Test for pods which stress process affects
 	if MEMORY_DEFAULT_LIMIT > memoryLoadVal || memoryLoadVal > MEMORY_VPA_LIMIT {
-		fmt.Println(memoryLoadVal)
-		fmt.Println(MEMORY_DEFAULT_LIMIT)
-		fmt.Println(MEMORY_VPA_LIMIT)
 		return errors.New("unexpected error: the memory resources is out of range")
 	}
 	return nil
 }
 
-func (cluster *Cluster) execCommand(command string, podList corev1.Pod) {
+// ExecCommand executes some command to a container in the podList.
+func (cluster *Cluster) ExecCommand(command string, podList corev1.Pod) {
 	time.Sleep(5 * time.Second)
 	cmd := []string{
 		"sh",
@@ -97,29 +93,39 @@ func (cluster *Cluster) execCommand(command string, podList corev1.Pod) {
 	}
 }
 
-func (cluster *Cluster) CreatePod(filepath string, namespace string) (*appsv1.Deployment, []corev1.Pod, error) {
+// CreateePods creates a pod.
+func (cluster *Cluster) CreatePod(filepath string, namespace string) (*appsv1.Deployment, error) {
 	if namespace == "" {
 		namespace = "default"
 	}
-	deploymentInterface := cluster.newDeploymentInterface(namespace)
+	deploymentInterface := cluster.Client.Clientset.AppsV1().Deployments(namespace)
 	if deploymentInterface == nil {
-		return nil, nil, errors.New("nil pointer")
+		return nil, errors.New("nil pointer")
 	}
-	deploymentConfig, err := createDeploymentStructure(filepath)
+	deploymentConfig, err := FetchDeploymentConfig(filepath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	_, err = deploymentInterface.Create(context.TODO(), deploymentConfig, metav1.CreateOptions{})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	log.Println("Deployment Created successfully!")
+	return deploymentConfig, nil
+}
+
+// CompletePods returns anything when creating new pods sucessfuly.
+func (cluster *Cluster) CompletePods(filepath string, namespace string) (*appsv1.Deployment, []corev1.Pod, error) {
+	deploymentConfig, err := cluster.CreatePod(filepath, namespace)
+	if err != nil {
+		return nil, nil, err
+	}
 	var pods []corev1.Pod
 	for i := 0; ; i++ {
 		if i > 10000 {
 			return nil, nil, fmt.Errorf("time limit exceed: couldn't fetch the pod information")
 		}
-		tmpPods, err := cluster.fetchPodList("")
+		tmpPods, err := cluster.Model.FetchPodList("", cluster)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -132,42 +138,12 @@ func (cluster *Cluster) CreatePod(filepath string, namespace string) (*appsv1.De
 	return deploymentConfig, pods, nil
 }
 
-func (cluster *Cluster) newDeploymentInterface(namespace string) v1.DeploymentInterface {
-	if cluster.Client.Clientset == nil {
-		return nil
-	}
-	deployment := cluster.Client.Clientset.AppsV1().Deployments(namespace)
-	return deployment
-}
-
-func createDeploymentStructure(path string) (*appsv1.Deployment, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		panic(err)
-	}
-
-	b, err := ioutil.ReadAll(file)
-	if err != nil {
-		panic(err)
-	}
-
-	deploymentConfig := &appsv1.Deployment{}
-	err = yaml.Unmarshal(b, deploymentConfig)
-	if err != nil {
-		panic(err)
-	}
-
-	return deploymentConfig, nil
-}
-
+// DeletePod delete an targeted pod.
 func (cluster *Cluster) DeletePod(namespace string, deploymentName string) error {
 	if namespace == "" {
 		namespace = "default"
 	}
-	deploymentInterface := cluster.newDeploymentInterface(namespace)
-	if deploymentInterface == nil {
-		return errors.New("nil pointer")
-	}
+	deploymentInterface := cluster.Client.Clientset.AppsV1().Deployments(namespace)
 	// Manage resource
 	err := deploymentInterface.Delete(context.TODO(), deploymentName, metav1.DeleteOptions{})
 	if err != nil {

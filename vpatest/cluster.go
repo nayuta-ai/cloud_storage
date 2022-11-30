@@ -14,11 +14,12 @@ import (
 type Cluster struct {
 	Config *rest.Config
 	Client Client
+	Model  FetchInterface
 }
 
 type Client struct {
-	Metrics   *metrics.Clientset
-	Clientset *clientset.Clientset
+	Metrics   metrics.Interface
+	Clientset clientset.Interface
 }
 
 // NewCluster connects a cluster.
@@ -41,30 +42,41 @@ func NewCluster() (*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	var client *Client
+	err = client.NewMetricsClient(config)
+	if err != nil {
+		return nil, err
+	}
+	err = client.NewClient(config)
+	if err != nil {
+		return nil, err
+	}
 	return &Cluster{
 		Config: config,
+		Client: *client,
+		Model:  &Config{},
 	}, nil
 }
 
 // NewMetricsClient creates *metrics.Clientset from *rest.Config.
 // It can get the resource information on the pods.
-func (cluster *Cluster) NewMetricsClient() error {
-	mc, err := metrics.NewForConfig(cluster.Config)
+func (client *Client) NewMetricsClient(config *rest.Config) error {
+	mc, err := metrics.NewForConfig(config)
 	if err != nil {
 		return err
 	}
-	cluster.Client.Metrics = mc
+	client.Metrics = mc
 	return nil
 }
 
 // NewClient creates the clientset from *rest.Config.
 // It can get the some information from pods or nodes.
-func (cluster *Cluster) NewClient() error {
-	client, err := clientset.NewForConfig(cluster.Config)
+func (client *Client) NewClient(config *rest.Config) error {
+	clientset, err := clientset.NewForConfig(config)
 	if err != nil {
 		return err
 	}
-	cluster.Client.Clientset = client
+	client.Clientset = clientset
 	return nil
 }
 
