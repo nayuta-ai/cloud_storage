@@ -1,33 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-        labels:
-                app: app
-        name: app
+  labels:
+    app: app
+  name: app
 spec:
-        replicas: 3
-        selector:
-                matchLabels:
-                        app: app
-        template:
-                metadata:
-                        labels:
-                                app: app
-                spec:
-                        containers:
-                                - image: yuta42173/pytorch-app:latest
-                                  name: app
-                                  ports:
-                                          - containerPort: 8080
-                                  resources:
-                                          requests:
-                                                  cpu: 50m
-                                                  memory: 50Mi
-                                  command: ["tail", "-f", "/dev/null"]
-                                  volumeMounts:
-                                          - name: claim-volume
-                                            mountPath: /work
-                        volumes:
-                                - name: claim-volume
-                                  persistentVolumeClaim:
-                                          claimName: pv-standard-claim
+  replicas: 3
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - image: yuta42173/pytorch-app:latest
+          name: app
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 50Mi
+          command: ["tail", "-f", "/dev/null"]
+          volumeMounts:
+            - name: claim-volume
+              mountPath: /work
+      volumes:
+        - name: claim-volume
+          persistentVolumeClaim:
+            claimName: pv-standard-claim
