@@ -5,6 +5,11 @@ start minikube
 start minikube
 ```
 
+enable metrics server addons
+```
+minikube addons enable metrics-server
+```
+
 get the metrics server
 ```
 kubectl get deployment metrics-server -n kube-system
